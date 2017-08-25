@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = 'mybustracker'
-  s.version = '0.2.0'
+  s.version = '0.2.1'
   s.summary = '*Currently under development*. An unofficial gem to query the mybustracker.co.uk web service for bus times etc. #edinburgh'
   s.authors = ['James Robertson']
   s.files = Dir['lib/mybustracker.rb']
