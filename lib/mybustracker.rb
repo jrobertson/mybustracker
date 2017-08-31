@@ -23,27 +23,24 @@ class MyBusTracker
     
     attr_reader :ref, :operator, :number, :name, :bus_stops
     
-    def initialize(client, appkey, service, all_bus_stops, number='')
+    def initialize(client, appkey, mbt,  service, number='')
       
       if number.empty? then
         raise MyBusTrackerException::Service, 'provide a bus service number'
       end
       
-      @client, @appkey = client, appkey      
+      @client, @appkey, @mbt = client, appkey, mbt
       
       @number, @name, @ref, relative_dests, operator  = \
-          %i(mnemo name ref dests operator).map {|field| service[field]}
-      
-      @all_bus_stops = all_bus_stops
+          %i(mnemo name ref dests operator).map {|field| service[field]}      
       
       Thread.new{ fetch_bus_stops() }
-
       
     end
     
     def inspect()
       "<#<MyBusTracker::Service:%s @number=\"%s\">" % [self.object_id, @number]
-    end
+    end    
     
     # accepts a bus service number and returns the relative bus times
     #
@@ -53,7 +50,7 @@ class MyBusTracker
       
       start_bus_stop1, start_bus_stop2 = find_bus_stop(from)
       end_bus_stop1, end_bus_stop2 = find_bus_stop(to)
-      
+
       # get the bus times
       
       bus_times = get_bus_times(start_bus_stop1)            
@@ -68,7 +65,6 @@ class MyBusTracker
             x[:stop_id] == end_bus_stop2[:stop_id]
       end
       
-
             
       if end_stop then
         start_bus_stop = start_bus_stop1
@@ -99,7 +95,6 @@ class MyBusTracker
       
       if journey then
         end_stop = journey.find {|x| x[:stop_id] == stop_id }
-        puts 'end_stop:' + end_stop.inspect
 
         journeys << [journey[0][:time], end_stop[:time]] 
       end
@@ -107,8 +102,8 @@ class MyBusTracker
       # get the journeys for the given period
       #secs = journeys[1][0][:time] - journey_times[0][:time]
       
-      from_times = journeys.map(&:first)
-      to_times = journeys.map(&:last)
+      from_times = journeys.map {|x| Time.strptime(x.first, "%H:%M").strftime("%-I:%M%P")}
+      to_times = journeys.map {|x| Time.strptime(x.last, "%H:%M").strftime("%-I:%M%P")}
 
       tstart = Time.strptime(journeys[0][0],"%H:%M")
       tend = Time.strptime(journeys[0][-1],"%H:%M")
@@ -124,33 +119,23 @@ class MyBusTracker
         to: {bus_stop: end_stop[:stop_name], bus_stop_id: end_stop[:stop_id], 
              times: to_times},
         stops: stops ,
-        start: journey_times[0][:time], 
-        end: end_stop[:time],
+        start: tstart.strftime("%-I:%M%P"), 
+        end: tend.strftime("%-I:%M%P"),
         travel_time: travel_time
       }
       
     end
     
+        
     private    
     
     def find_bus_stop(address)
       
-      results = Geocoder.search(address.sub(/,? *edinburgh$/i,'') \
-                                + ", Edinburgh")
-      
-      p1    = Geodesic::Position.new(*results[0].coordinates)
-
-      a = @all_bus_stops.sort_by do |h|
-        
-        x, y = %i(x y).map {|fields| h[fields].to_f.round(4)}
-
-        p2 = Geodesic::Position.new(x, y)
-        d = Geodesic::dist_haversine(p1.lat, p1.lon, p2.lat, p2.lon).round(4)
-      end
-      a.take 2
+      @mbt.find_nearest_stops(address, limit: 2).map(&:first)
             
     end
     
+
     def get_bus_times(start_bus_stop)
       
       response = @client.call(:get_bus_times, message: { key: @appkey, 
@@ -262,12 +247,33 @@ class MyBusTracker
     response = client.call(:get_bus_stops, message: { key: appkey  })
     @all_bus_stops = response.body[:bus_stops_response][:bus_stops][:list]
 
+  end
+  
+  def find_nearest_stops(address, limit: 4)
+
+    results = Geocoder.search(address.sub(/,? *edinburgh$/i,'') \
+                              + ", Edinburgh")
+    
+    p1    = Geodesic::Position.new(*results[0].coordinates)
+
+    a = @all_bus_stops.map do |h|
+      
+      x, y = %i(x y).map {|fields| h[fields].to_f.round(4)}
+
+      p2 = Geodesic::Position.new(x, y)
+      d = Geodesic::dist_haversine(p1.lat, p1.lon, p2.lat, p2.lon).round(4)
+      [h,d]
+    end
+    
+    a.sort_by(&:last).take limit
 
   end
 
+  alias nearest_stops find_nearest_stops
+
   def inspect()
     "<#<MyBusTracker:%s>" % [self.object_id]
-  end  
+  end
 
   # returns the number and name of all bus services
   #
@@ -282,9 +288,8 @@ class MyBusTracker
   def service(number='')
     
     service = @all_services.find {|x| x[:mnemo] == number }        
-    Service.new @client, @appkey, service, @all_bus_stops, number
+    Service.new @client, @appkey, self, service,  number
     
-  end
-    
+  end            
   
 end
